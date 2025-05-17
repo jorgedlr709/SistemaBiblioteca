@@ -4,8 +4,8 @@ import java.io.Serializable;
 import java.time.LocalDate;
 
 public class Prestamo implements Serializable {
-    private String isbnLibro;
-    private LocalDate fechaPrestamo;
+    private final String isbnLibro;
+    private final LocalDate fechaPrestamo;
 
     // Constructor que asigna la fecha actual
     public Prestamo(String isbnLibro) {
@@ -27,4 +27,5 @@ public class Prestamo implements Serializable {
         return fechaPrestamo;
     }
 }
+
 

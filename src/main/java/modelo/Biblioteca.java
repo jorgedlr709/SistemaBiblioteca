@@ -19,13 +19,13 @@ public class Biblioteca implements Serializable {
 
     private static Biblioteca instancia;
 
-    private Map<String, Libro> libros;
-    private Map<Integer, Usuario> usuarios;
-    private Map<Integer, List<Prestamo>> prestamos;
+    private final Map<String, Libro> libros;
+    private final Map<Integer, Usuario> usuarios;
+    private final Map<Integer, List<Prestamo>> prestamos;
 
-    private UsuarioDAO usuarioDAO;
-    private LibroDAO libroDAO;
-    private PrestamosDAO prestamosDAO;
+    private final UsuarioDAO usuarioDAO;
+    private final LibroDAO libroDAO;
+    private final PrestamosDAO prestamosDAO;
 
     private Biblioteca() {
         libros = new HashMap<>();
@@ -90,8 +90,8 @@ public class Biblioteca implements Serializable {
     }
 
     public static class Prestamo {
-        private String isbnLibro;
-        private LocalDate fechaPrestamo;
+        private final String isbnLibro;
+        private final LocalDate fechaPrestamo;
 
         public Prestamo(String isbnLibro) {
             this.isbnLibro = isbnLibro;
@@ -230,6 +230,8 @@ public class Biblioteca implements Serializable {
         return isbn != null && isbn.matches("\\d{13}");
     }
 }
+
+
 
 
 
