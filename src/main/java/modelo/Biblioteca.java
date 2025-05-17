@@ -1,15 +1,19 @@
-package modelo.biblioteca;
+package modelo;
 
 import modelo.libros.Libro;
 import modelo.usuarios.Usuario;
 import modelo.usuarios.Estudiante;
 import modelo.usuarios.Profesor;
+import persistencia.UsuarioDAO;
+import persistencia.LibroDAO;
+import persistencia.PrestamosDAO;
 import excepciones.*;
 
 import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.sql.SQLException;
 
 public class Biblioteca implements Serializable {
 
@@ -17,12 +21,57 @@ public class Biblioteca implements Serializable {
 
     private Map<String, Libro> libros;
     private Map<Integer, Usuario> usuarios;
-    private Map<Integer, List<Prestamo>> prestamos; // Usuarios con lista de préstamos
+    private Map<Integer, List<Prestamo>> prestamos;
+
+    private UsuarioDAO usuarioDAO;
+    private LibroDAO libroDAO;
+    private PrestamosDAO prestamosDAO;
 
     private Biblioteca() {
         libros = new HashMap<>();
         usuarios = new HashMap<>();
         prestamos = new HashMap<>();
+        usuarioDAO = new UsuarioDAO();
+        libroDAO = new LibroDAO();
+        prestamosDAO = new PrestamosDAO();
+
+        // Carga usuarios desde la base de datos
+        try {
+            List<Usuario> listaUsuarios = usuarioDAO.listarUsuarios();
+            for (Usuario u : listaUsuarios) {
+                usuarios.put(u.getId(), u);
+            }
+        } catch (Exception e) {
+            System.err.println("Error cargando usuarios desde BD: " + e.getMessage());
+        }
+
+        // Carga libros desde la base de datos
+        try {
+            List<Libro> listaLibros = libroDAO.obtenerTodosLosLibros();
+            for (Libro l : listaLibros) {
+                libros.put(l.getIsbn(), l);
+            }
+        } catch (SQLException e) {
+            System.err.println("Error cargando libros desde BD: " + e.getMessage());
+        }
+
+        // Carga préstamos desde la base de datos
+        try {
+            for (Integer idUsuario : usuarios.keySet()) {
+                List<Prestamo> prestamosUsuario = prestamosDAO.obtenerPrestamosPorUsuario(idUsuario);
+                prestamos.put(idUsuario, prestamosUsuario);
+
+                // Marcar libros como no disponibles si están prestados
+                for (Prestamo p : prestamosUsuario) {
+                    Libro libroPrestado = libros.get(p.getIsbnLibro());
+                    if (libroPrestado != null) {
+                        libroPrestado.setDisponible(false);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Error cargando préstamos desde BD: " + e.getMessage());
+        }
     }
 
     public static Biblioteca getInstancia() {
@@ -32,7 +81,14 @@ public class Biblioteca implements Serializable {
         return instancia;
     }
 
-    // Clase interna para manejar préstamos
+    public Map<String, Libro> getLibros() {
+        return libros;
+    }
+
+    public Map<Integer, Usuario> getUsuarios() {
+        return usuarios;
+    }
+
     public static class Prestamo {
         private String isbnLibro;
         private LocalDate fechaPrestamo;
@@ -40,6 +96,11 @@ public class Biblioteca implements Serializable {
         public Prestamo(String isbnLibro) {
             this.isbnLibro = isbnLibro;
             this.fechaPrestamo = LocalDate.now();
+        }
+
+        public Prestamo(String isbnLibro, LocalDate fechaPrestamo) {
+            this.isbnLibro = isbnLibro;
+            this.fechaPrestamo = fechaPrestamo;
         }
 
         public String getIsbnLibro() {
@@ -51,7 +112,6 @@ public class Biblioteca implements Serializable {
         }
     }
 
-    // Registro libro con validación de ISBN
     public void registrarLibro(Libro libro) throws BibliotecaException {
         if (!validarISBN(libro.getIsbn())) {
             throw new ISBNException("ISBN inválido: " + libro.getIsbn());
@@ -59,10 +119,14 @@ public class Biblioteca implements Serializable {
         if (libros.containsKey(libro.getIsbn())) {
             throw new BibliotecaException("El libro con ISBN " + libro.getIsbn() + " ya está registrado.");
         }
-        libros.put(libro.getIsbn(), libro);
+        try {
+            libroDAO.insertarLibro(libro); // Guarda en BD
+            libros.put(libro.getIsbn(), libro); // Guarda en memoria
+        } catch (SQLException e) {
+            throw new BibliotecaException("Error al guardar libro: " + e.getMessage());
+        }
     }
 
-    // Buscar libro por ISBN
     public Libro buscarLibroPorIsbn(String isbn) throws BibliotecaException {
         if (!libros.containsKey(isbn)) {
             throw new BibliotecaException("Libro no encontrado con ISBN: " + isbn);
@@ -70,15 +134,18 @@ public class Biblioteca implements Serializable {
         return libros.get(isbn);
     }
 
-    // Registro usuario
     public void registrarUsuario(Usuario usuario) throws BibliotecaException {
         if (usuarios.containsKey(usuario.getId())) {
             throw new BibliotecaException("El usuario con ID " + usuario.getId() + " ya está registrado.");
         }
-        usuarios.put(usuario.getId(), usuario);
+        try {
+            usuarioDAO.guardarUsuario(usuario);
+            usuarios.put(usuario.getId(), usuario);
+        } catch (Exception e) {
+            throw new BibliotecaException("Error al registrar usuario: " + e.getMessage());
+        }
     }
 
-    // Buscar usuario por ID
     public Usuario buscarUsuarioPorId(int id) throws BibliotecaException {
         if (!usuarios.containsKey(id)) {
             throw new BibliotecaException("Usuario no encontrado con ID: " + id);
@@ -86,7 +153,6 @@ public class Biblioteca implements Serializable {
         return usuarios.get(id);
     }
 
-    // Realizar préstamo
     public void realizarPrestamo(int idUsuario, String isbnLibro) throws BibliotecaException {
         Usuario usuario = buscarUsuarioPorId(idUsuario);
         Libro libro = buscarLibroPorIsbn(isbnLibro);
@@ -107,13 +173,20 @@ public class Biblioteca implements Serializable {
             }
         }
 
-        prestamosUsuario.add(new Prestamo(isbnLibro));
+        Prestamo nuevoPrestamo = new Prestamo(isbnLibro);
+        prestamosUsuario.add(nuevoPrestamo);
         prestamos.put(idUsuario, prestamosUsuario);
+
+        // Persistir préstamo en BD
+        try {
+            prestamosDAO.insertarPrestamo(idUsuario, isbnLibro, nuevoPrestamo.getFechaPrestamo());
+        } catch (SQLException e) {
+            throw new BibliotecaException("Error al guardar préstamo en BD: " + e.getMessage());
+        }
 
         libro.setDisponible(false);
     }
 
-    // Devolver libro y calcular multa
     public double devolverLibro(int idUsuario, String isbnLibro) throws BibliotecaException {
         Usuario usuario = buscarUsuarioPorId(idUsuario);
         Libro libro = buscarLibroPorIsbn(isbnLibro);
@@ -138,10 +211,17 @@ public class Biblioteca implements Serializable {
         long diasPrestamo = ChronoUnit.DAYS.between(prestamoEncontrado.getFechaPrestamo(), LocalDate.now());
         long diasRetraso = diasPrestamo > 14 ? diasPrestamo - 14 : 0;
 
-        double multa = usuario.calcularMulta((int)diasRetraso);
+        double multa = usuario.calcularMulta((int) diasRetraso);
 
         libro.setDisponible(true);
         prestamosUsuario.remove(prestamoEncontrado);
+
+        // Eliminar préstamo de BD
+        try {
+            prestamosDAO.eliminarPrestamo(idUsuario, isbnLibro);
+        } catch (SQLException e) {
+            throw new BibliotecaException("Error al eliminar préstamo en BD: " + e.getMessage());
+        }
 
         return multa;
     }
@@ -150,3 +230,9 @@ public class Biblioteca implements Serializable {
         return isbn != null && isbn.matches("\\d{13}");
     }
 }
+
+
+
+
+
+
